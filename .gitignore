@@ -1,0 +1,12 @@
+# Python cache
+__pycache__/
+
+# Python build files
+*.egg-info/
+build/
+
+# Log files etc
+*.nvvp
+*.out
+*.txt
+*.log
