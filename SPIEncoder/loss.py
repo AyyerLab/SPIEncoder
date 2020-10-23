@@ -20,7 +20,7 @@ class LossCalculator():
         config_dir = os.path.dirname(config_fname)
 
         detector_fname = os.path.join(config_dir, config.get('encoder', 'in_detector_file'))
-        photons_fname = os.path.join(config_dir, config.get('encoder', 'in_photons_file'))
+        photons_fname = os.path.join(config_dir, config.get('encoder', 'in_photons_file', fallback=''))
         self.output_folder = os.path.join(config_dir, config.get('encoder', 'output_folder', fallback='data/'))
         num_div = config.getint('encoder', 'num_div')
         self.ltype = config.get('encoder', 'loss_type', fallback='').lower()
