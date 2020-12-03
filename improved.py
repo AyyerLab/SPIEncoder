@@ -177,7 +177,27 @@ def fit(intens, rotation_sq_r, model, optimizer, epochs, n_batches, planes_S_th)
   label_all = label_r[:10000]
   recon_2D_all = recon_2D_all_0[1:]
 
-def main(fname, res, epochs, batch_size):
+  rec_model_3D = np.zeros([5,81,81,81])
+  latent_class = np.array([np.mean(mu_all[label_all == i], axis=0) for i in range(5)])
+  latent_class_th = torch.from_numpy(latent_class).to(device).float()
+  for i in range(5):
+      rec_model_3D[i] = model.decode(latent_class_th[i]).detach().cpu().clone().numpy()
+
+
+  data_tem = h5py.File('Figure_t4/temporal_data.h5','w')
+  data_tem['mu_all'] = mu_all
+  data_tem['logvar_all'] = logvar_all
+  data_tem['omu_all'] = omu_all
+  data_tem['ologvar_all'] = ologvar_all
+  data_tem['label_all'] = label_all
+  data_tem['recon_2D_all'] = recon_2D_all
+  data_tem['rec_model_3D'] = rec_model_3D
+  data_tem.close()
+
+
+
+
+def main(fname, z_dim, res, epochs, batch_size):
     preproc = Preprocessing(fname, res)
     preproc.load()
     preproc.scale_down()
@@ -201,4 +221,4 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--resolution', type=int, default=1, help='resolution')
     parser.add_argument('-e', '--epochs', type=int, default=10, help='epochs')
     args = parser.parse_args()
-    main(args.fname, args.resolution, args.epochs, args.batch)
+    main(args.fname, args.z_dim, args.resolution, args.epochs, args.batch)
