@@ -6,6 +6,8 @@ import time
 import numpy as np
 import cupy as cp
 import h5py
+from torch import nn
+from torch.utils.dlpack import to_dlpack, from_dlpack
 
 from cupadman import CDetector, CDataset, Quaternion
 
@@ -21,8 +23,10 @@ class LossCalculator():
 
         detector_fname = os.path.join(config_dir, config.get('encoder', 'in_detector_file'))
         photons_fname = os.path.join(config_dir, config.get('encoder', 'in_photons_file', fallback=''))
+        intens_fname = os.path.join(config_dir, config.get('encoder', 'in_intens_file', fallback=''))
         self.output_folder = os.path.join(config_dir, config.get('encoder', 'output_folder', fallback='data/'))
         num_div = config.getint('encoder', 'num_div')
+        point_group = config.get('encoder', 'point_group', fallback='')
         self.ltype = config.get('encoder', 'loss_type', fallback='').lower()
         if self.ltype == '':
             print('Using default Euclidean distance loss')
@@ -31,6 +35,7 @@ class LossCalculator():
             raise ValueError('loss_type must be one of euclidean or likelihood')
         elif self.ltype == 'euclidean':
             self.calc_loss = self._calc_loss_euclidean
+            self.mse = nn.MSELoss()
         elif self.lytp == 'likelihood':
             raise NotImplementedError('Likelihood loss calculation not implemented yet')
 
@@ -38,14 +43,15 @@ class LossCalculator():
         # -- Generate detector, dataset, quaternions
         # -- Note the following three structs have data in CPU memory
         self.det = CDetector(detector_fname)
+        self.quat = Quaternion(num_div, point_group)
         if self.ltype == 'likelihood':
             self.dset = CDataset(photons_fname, self.det)
         else:
             self.dset = None
-        self.quat = Quaternion(num_div)
-        self.size = int(2*np.ceil(np.linalg.norm(self.det.qvals, axis=1).max()) + 3)
+
+        self.size = int(2*np.ceil(np.linalg.norm(self.det.qvals[self.det.raw_mask<2], axis=1).max()) + 3)
         self._move_to_gpu()
-        
+
         # -- Get CUDA kernels
         script_dir = os.path.dirname(os.path.abspath(__file__))
         with open(script_dir+'/kernels.cu', 'r') as f:
@@ -60,19 +66,44 @@ class LossCalculator():
 
         print('Completed loss calculator setup: %f s' % (time.time() - stime))
 
-    def _calc_loss_euclidean(self, img, model):
+    def _calc_loss_euclidean(self, img, model, octant=None):
+        '''Euclidean loss
+
+        Minimum mean-squared error (MSE) between img and model slices
+
+        Arguments:
+            img: Torch tensor of shape (det.num_pix,)
+            model: Torch tensor of shape (size, size, size)
+        '''
         losses = cp.empty(self.quat.num_rot)
+        if octant is True or (octant is None and self.quat.octahedral_flag):
+            dmodel = cp.empty((self.size,)*3)
+            cen = self.size // 2
+
+            # Fill out octahedrally symmetric grid
+            dmodel[cen:, cen:, cen:] = model[:,:,:]
+            dmodel[cen:, cen:, :cen+1] = model[:,:,::-1]
+            dmodel[cen:, :cen+1, cen:] = model[:,::-1,:]
+            dmodel[cen:, :cen+1, :cen+1] = model[:,::-1,::-1]
+            dmodel[:cen+1, cen:, cen:] = model[::-1,:,:]
+            dmodel[:cen+1, cen:, :cen+1] = model[::-1,:,::-1]
+            dmodel[:cen+1, :cen+1, cen:] = model[::-1,::-1,:]
+            dmodel[:cen+1, :cen+1, :cen+1] = model[::-1,::-1,::-1]
+        elif octant is False or (octant is None and not self.quat.octahedral_flag):
+            dmodel = model
+
         for i, r in enumerate(range(self.quat.num_rot)):
             snum = i % self.num_streams
-            
+
             self.stream_list[snum].use()
             self.k_slice_gen((self.bsize_pixel,), (32,),
-                    (model, self.quats[r], self.pixvals,
+                    (dmodel, self.quats[r], self.pixvals,
                      self.dmask, 0., self.det.num_pix,
                      self.size, self.views[snum]))
-            losses[i] = self.k_sqdiff(img, self.views[snum])
             #losses[i] = cp.linalg.norm(self.views[snum] - img)
-        return losses.max(), self.quats[losses.argmax(), :4]
+            #losses[i] = self.mse(img, from_dlpack(self.views[snum].toDlpack()))
+            losses[i] = self.k_sqdiff(img, self.views[snum])
+        return losses.max()/self.det.num_pix, self.quats[losses.argmax(), :4]
 
     def _move_to_gpu(self):
         '''Move detector, dataset and quaternions to GPU'''
