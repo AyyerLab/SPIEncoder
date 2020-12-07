@@ -5,11 +5,11 @@ device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 
 
 class UnFlatten(nn.Module):
-    def forward(self, input):
-        return input.view(-1, 256, 3, 3, 3)
+    def forward(self, x):
+        return x.view(-1, 256, 3, 3, 3)
 
 class VAE(nn.Module):
-    def __init__(self, image_channels=1, h_dim=128, z_dim=1):
+    def __init__(self, z_dim=1):
         super(VAE, self).__init__()
         self.encoder = None
         self.decoder = None
@@ -20,18 +20,28 @@ class VAE(nn.Module):
         self._init_decoder()
         self.ori = None
 
-    def _init_encoder(self):
-        self.encoder = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, stride=3, padding=1),
-            nn.BatchNorm2d(16), nn.ReLU(), #nn.Dropout(p=0.1),
-            nn.Conv2d(16, 64, kernel_size=3, stride=3, padding=1),
-            nn.BatchNorm2d(64), nn.ReLU(),# nn.Dropout(p=0.1),
-            nn.Conv2d(64, 128, kernel_size=3, stride=3, padding=1),
-            nn.BatchNorm2d(128), nn.ReLU(),# nn.Dropout(p=0.1),
+    def _init_encoder(self, dropouts=False):
+        modules = []
+        layer_widths = [1, 16, 64, 128]
+
+        # Convolutional layers
+        for i in range(len(layer_widths) - 1):
+            modules.extend([
+                nn.Conv2d(layer_widths[i], layer_widths[i+1], kernel_size=3, stride=3, padding=1),
+                nn.BatchNorm2d(layer_widths[i+1]),
+                nn.ReLU()
+            ])
+            if dropouts:
+                modules.append(nn.Dropout(p=0.1))
+
+        # Flat layers
+        modules.extend([
             nn.Flatten(),
             nn.Linear(3*3*128, 64),
             nn.ReLU()
-            )
+        ])
+
+        self.encoder = nn.Sequential(*tuple(modules))
 
     def _init_latent_layers(self):
         #self.fc0 = nn.Linear(128, 64)
@@ -40,27 +50,29 @@ class VAE(nn.Module):
         self.fc3 = nn.Linear(self.z_dim, 64)
         #self.fc4 = nn.Linear(64, 128)
 
+    def _init_decoder(self, dropouts=False):
+        layer_widths = [256, 128, 64, 16, 8]
 
+        # Initial flat layers
+        modules = [nn.Linear(64, 256*3*3*3), nn.ReLU(), UnFlatten()]
 
-    def _init_decoder(self):
-        self.decoder = nn.Sequential(
-            #nn.Linear(3, 64),
-            nn.Linear(64, 256*3*3*3),
-            nn.ReLU(),
-            UnFlatten(),
-            nn.ConvTranspose3d(256, 128, kernel_size=3, stride=3),
-            nn.BatchNorm3d(128), nn.ReLU(), #nn.Dropout(p=0.1),
-            nn.ConvTranspose3d(128, 64, kernel_size=3, padding=1 ),
-            nn.BatchNorm3d(64), nn.ReLU(), #nn.Dropout(p=0.1),
-            nn.ConvTranspose3d(64, 16, kernel_size=3, stride=3),
-            nn.BatchNorm3d(16), nn.ReLU(), #nn.Dropout(p=0.1),
-            nn.ConvTranspose3d(16, 8, kernel_size=3, stride=3),
-            nn.BatchNorm3d(8), nn.ReLU(), #nn.Dropout(p=0.1),
-            #nn.ConvTranspose3d(8, 4, kernel_size=3, padding=1 ),
-            #nn.BatchNorm3d(4), nn.ReLU(), nn.Dropout(p=0.3),
-            nn.ConvTranspose3d(8, 1, kernel_size=3, padding=1 ),
+        # Convolutional layers
+        for i in range(len(layer_widths) - 1):
+            modules.extend([
+                nn.ConvTranspose3d(layer_widths[i], layer_widths[i+1], kernel_size=3, stride=3),
+                nn.BatchNorm3d(layer_widths[i+1]),
+                nn.ReLU()
+            ])
+            if dropouts:
+                modules.append(nn.Dropout(p=0.1))
+
+        # Last sigmoid layer
+        modules.extend([
+            nn.ConvTranspose3d(layer_widths[-1], 1, kernel_size=3, padding=1),
             nn.Sigmoid()
-            )
+        ])
+
+        self.decoder = nn.Sequential(*tuple(modules))
 
     def sampling(self, mu, logvar):
         std = logvar.mul(0.5).exp_().to(device)
