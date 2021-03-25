@@ -9,7 +9,7 @@ class UnFlatten(nn.Module):
         return input.view(-1, 256, 3, 3, 3)
 
 class VAE(nn.Module):
-    def __init__(self, image_channels=1, h_dim=128, z_dim=1, info_dim=5):
+    def __init__(self, image_channels=1, h_dim=128, z_dim=2, info_dim=5):
         super(VAE, self).__init__()
         self.encoder = None
         self.decoder = None
