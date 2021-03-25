@@ -45,13 +45,13 @@ class Preprocessing:
         self.select_number = None
 
     def load(self):
-        with h5py.File('../VAE_cub42/ACC10k_PCA_coor.h5', 'r') as h5:
+        with h5py.File('/home/zhuangyu/VAE_cub42/ACC10k_PCA_coor.h5', 'r') as h5:
             labels0 = np.copy(h5['predict_PCA_coor'][:])
         rlist = np.where(((labels0[:,0]+0.15)*(-4) > labels0[:,1]) & (labels0[:,1] > -0.5))[0]
         self.select_number = len(rlist)
         with h5py.File(self.fname, 'r') as h5:
             intens_input00 = np.copy(h5['intens_input'][:])
-            self.ave_image = np.copy(h5['ave_image'][:])
+            #self.ave_image = np.copy(h5['ave_image'][:])
             gain0 = np.copy(h5['gain'][:])
             corr0 = np.copy(h5['corr'][:])
             rotation_sq0 = np.copy(h5['quat_data'][:])
@@ -177,20 +177,15 @@ def train(intens, rotation_sq_r, model, optimizer, epochs, n_batches, planes_S_t
                                     epochs, loss.data.item(), bce.data.item(), bse.data.item(), kld.data.item())
             print(to_print)
 
-    torch.save(model.state_dict(), fold_save+'/Vae_cnn3D_dict')
+    torch.save(model.state_dict(), fold_save+'/Vae_CNN3D_dict')
 
 
 
-
-
-
-
-
-def fit(intens, rotation_sq_r, model, optimizer, epochs, n_batches, planes_S_th, fold_save):
-  model.load_state_dict(torch.load(fold_save+'/Vae_cnn3D_dict'))
+def fit(intens, rotation_sq_r, model, optimizer, epochs, n_batches, planes_S_th):
   mu_all_0 = np.zeros((1,model.z_dim))
   logvar_all_0 = np.zeros((1,model.z_dim))
   recon_2D_all_0 = np.zeros((1,1,81,81))
+
   for i in range(intens.shape[0]//n_batches):
       # Local batches and labels
       images = torch.from_numpy(intens[i*n_batches:(i+1)*n_batches]).view(n_batches,1,81,81)
@@ -215,9 +210,14 @@ def fit(intens, rotation_sq_r, model, optimizer, epochs, n_batches, planes_S_th,
   return mu_all, logvar_all
 
 
-
-
 def main(fname, z_dim, info_dim, res, epochs, batch_size, fold_save):
+#main(Path+input_fname,z_dim,info_dim,res,epoch,batch_size,Path+save_foldername)
+    res = 1
+    batch_size = 20
+    fname = Path+input_fname
+    epochs = epoch
+    fold_save = Path+save_foldername
+    #
     preproc = Preprocessing(fname, res)
     preproc.load()
     preproc.scale_down()
@@ -236,8 +236,17 @@ def main(fname, z_dim, info_dim, res, epochs, batch_size, fold_save):
     print('Done!')
 
     print('Start fitting')
-    mu_all,logvar_all = fit(preproc.intens, preproc.rotation_sq_r, model, optimizer, epochs, batch_size, preproc.planes_S_th, fold_save)
+    model.load_state_dict(torch.load(fold_save+'/Vae_CNN3D_dict'))
+    model.eval()
+    mu_all,logvar_all = fit(preproc.intens, preproc.rotation_sq_r, model, optimizer, epochs, batch_size, preproc.planes_S_th)
     print('Done!')
+    plt.figure(figsize=(8,6))
+    plt.scatter(mu_all[:,0], mu_all[:,1], s=1, c=preproc.label_r[:mu_all.shape[0],1])
+    plt.tight_layout()
+    plt.colorbar(label='PCA-1')
+    plt.savefig(fold_save+'/latent_space.png')
+
+
 
     with h5py.File(fold_save+'/data.h5', "w") as data_tem:
         data_tem['mu_all'] = mu_all
@@ -246,20 +255,16 @@ def main(fname, z_dim, info_dim, res, epochs, batch_size, fold_save):
 
 
 
-    #print('Start fitting')
-    #fit(preproc.intens, preproc.rotation_sq_r, model, optimizer, epochs, batch_size, preproc.planes_S_th, fold_save)
-    #print('Done!')
-
 if __name__ == '__main__':
     import configparser
     config = configparser.ConfigParser()
     config.read('config_test.ini')
-    PATH = str(config['DEFAULT']['PATH'])
+    Path = str(config['DEFAULT']['PATH'])
     input_fname = str(config['DEFAULT']['input_fname'])
-    save_foldername = str(config['DEFAULT']['save_foldername'])
     z_dim = int(config['DEFAULT']['z_dim'])
     info_dim = int(config['DEFAULT']['info_dim'])
     batch_size = int(config['DEFAULT']['batch_size'])
     epoch = int(config['DEFAULT']['epoch'])
     res = int(config['DEFAULT']['resolution_option'])
-    main(PATH+input_fname,z_dim,info_dim,res,epoch,batch_size,PATH+save_foldername)
+    save_foldername = 'MODEL_z_'+str(z_dim)+'_info_'+str(info_dim)
+    main(Path+input_fname,z_dim,info_dim,res,epoch,batch_size,Path+save_foldername)
