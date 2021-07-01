@@ -1,19 +1,17 @@
 import torch
 import torch.nn as nn
-# Device configuration
-device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
-
 
 class UnFlatten(nn.Module):
-    def forward(self, x):
+    def forward(self, x): # pylint: disable=arguments-differ
         return x.view(-1, 256, 3, 3, 3)
 
 class VAE(nn.Module):
-    def __init__(self, z_dim=1):
-        super(VAE, self).__init__()
+    def __init__(self, device, z_dim=1):
+        super().__init__()
+        self.device = device
+        self.z_dim = z_dim
         self.encoder = None
         self.decoder = None
-        self.z_dim = z_dim
         #self.x = x
         self._init_encoder()
         self._init_latent_layers()
@@ -75,16 +73,16 @@ class VAE(nn.Module):
         self.decoder = nn.Sequential(*tuple(modules))
 
     def sampling(self, mu, logvar):
-        std = logvar.mul(0.5).exp_().to(device)
+        std = logvar.mul(0.5).exp_().to(self.device)
         # return torch.normal(mu, std)
-        esp = torch.randn(*mu.size()).to(device)
+        esp = torch.randn(*mu.size()).to(self.device)
         z = mu + std * esp
         return z
 
     def latent_layer(self, h):
         h1 = torch.cat([h, self.ori[:,:4]], dim=1)
         mu, logvar = self.fc1(h1), self.fc2(h1)
-        z = self.sampling(mu, logvar).to(device)
+        z = self.sampling(mu, logvar).to(self.device)
         return z, mu, logvar
 
     def encode(self, x):
@@ -97,7 +95,7 @@ class VAE(nn.Module):
         z = self.decoder(z)
         return z
 
-    def forward(self, x_all):
+    def forward(self, x_all): # pylint: disable=arguments-differ
         x = x_all[0]
         self.ori = x_all[1]
         z, mu, logvar = self.encode(x)
