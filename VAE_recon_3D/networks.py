@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-# Device configuration
-#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class UnFlatten(nn.Module):
     def forward(self, input):
@@ -9,7 +7,7 @@ class UnFlatten(nn.Module):
 
 class VAE_HD(nn.Module):
     def __init__(self, device, image_channels=1, h_dim=128, z_dim=2, info=1):
-        super(VAE_HD, self).__init__()
+        super().__init__()
         self.encoder = None
         self.decoder = None
         self.device = device
@@ -98,10 +96,9 @@ class VAE_HD(nn.Module):
         z = self.decode(z)
         return z, mu, logvar
 
-# middle resolution
 class VAE_MD(nn.Module):
     def __init__(self, device, image_channels=1, h_dim=128, z_dim=2, info=1):
-        super(VAE_MD, self).__init__()
+        super().__init__()
         self.encoder = None
         self.decoder = None
         self.device = device
@@ -189,10 +186,9 @@ class VAE_MD(nn.Module):
         z = self.decode(z)
         return z, mu, logvar
 
-
 class VAE_LD(nn.Module):
     def __init__(self, image_channels=1, h_dim=128, z_dim=2, info=1):
-        super(VAE_LD, self).__init__()
+        super().__init__()
         self.encoder = None
         self.decoder = None
         self.z_dim = z_dim
@@ -270,3 +266,5 @@ class VAE_LD(nn.Module):
         z, mu, logvar = self.encode(x)
         z = self.decode(z)
         return z, mu, logvar
+
+VAE_LD_Paper = VAE_LD
