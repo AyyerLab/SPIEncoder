@@ -108,7 +108,7 @@ class Trainer():
         self.preproc = preproc
         self.device = device
 
-        self.model = VAE(z_dim=z_dim).to(self.device)
+        self.model = VAE(device, z_dim).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3)
 
     @staticmethod
