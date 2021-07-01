@@ -13,8 +13,8 @@ import torch.nn.functional as F
 from scipy import interpolate
 import os
 import sys
-from VAE_preprocessing import Preprocessing
-from VAE_generating_volumes import generating
+from preprocessing import Preprocessing
+from generating_volumes import generating
 
 # Device configuration
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

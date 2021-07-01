@@ -5,7 +5,6 @@ from scipy.interpolate import RegularGridInterpolator as rgi
 import random
 from pylab import cross,dot,inv
 import argparse
-from VAE_network_MD_SK import UnFlatten, VAE_LD, VAE_MD, VAE_HD
 import torch
 import torch.nn as nn
 from torch import optim
@@ -13,6 +12,7 @@ import torch.nn.functional as F
 from scipy import interpolate
 import os
 import sys
+from network import UnFlatten, VAE_LD, VAE_MD, VAE_HD
 
 
 def generating(z_dim, info, res, fold_save, device):

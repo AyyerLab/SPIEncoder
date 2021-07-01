@@ -5,7 +5,7 @@ from scipy.interpolate import RegularGridInterpolator as rgi
 import random
 from pylab import cross,dot,inv
 import argparse
-from VAE_network_MD_SK import UnFlatten, VAE_LD, VAE_MD, VAE_HD
+from network import UnFlatten, VAE_LD, VAE_MD, VAE_HD
 import torch
 import torch.nn as nn
 from torch import optim

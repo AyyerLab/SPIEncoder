@@ -17,7 +17,7 @@ import os
 import numpy as np
 import torch
 from torch import optim
-from VAE_network_MD_SK import UnFlatten, VAE_LD, VAE_MD, VAE_HD
+from network import UnFlatten, VAE_LD, VAE_MD, VAE_HD
 
 # Device configuration
 device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
