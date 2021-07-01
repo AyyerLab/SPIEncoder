@@ -67,10 +67,6 @@ class VAEReconstructor():
 
     def preprocess(self):
         self.preproc = Preprocessing(self.input_fname, self.res_str, self.n_info, self.device)
-        self.preproc.load()
-        self.preproc.scale_down()
-        self.preproc.shuffle()
-        self.preproc.slice_planes()
 
     def run(self, runtype):
         if runtype in ['train', 'all']:
