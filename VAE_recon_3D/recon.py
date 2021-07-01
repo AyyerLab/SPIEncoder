@@ -1,298 +1,243 @@
+import os
+import configparser
+import argparse
+
 import numpy as np
 import matplotlib.pyplot as plt
 import h5py
-from scipy.interpolate import RegularGridInterpolator as rgi
-import random
-from pylab import cross,dot,inv
-import argparse
-from VAE_network_MD_SK import UnFlatten, VAE_LD, VAE_MD, VAE_HD
 import torch
 import torch.nn as nn
 from torch import optim
-import torch.nn.functional as F
-from scipy import interpolate
-import os
-import sys
+import torch.nn.functional as functional
+
+import networks
 from preprocessing import Preprocessing
 from generating_volumes import generating
 
-# Device configuration
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-torch.manual_seed(0)
-#source activate /home/ayyerkar/.conda/envs/cuda
+class VAEReconstructor():
+    def __init__(self, config_fname, device, learning_rate=1.e-3):
+        self.device = device
+        self._parse_config(config_fname)
+        self._get_model()
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
 
+    def _parse_config(self, config_fname):
+        config = configparser.ConfigParser()
+        config.read(config_fname)
 
-def loss_function(recon_intens_3d, planes_S_th, x, mu, logvar, b_num, n_batches):
-    def best_projection_layer(recon_intens_3d_i, x_i, i):
-        select_plane = planes_S_th[b_num*n_batches+i]
-        volume_size = (recon_intens_3d_i.shape[2])
-        grid = select_plane.float()#/(volume_size*sampling//2+1)
-        #print(volume_size, grid.max(), grid.min())
-        recon_x_i = F.grid_sample(recon_intens_3d_i.view(1,1,volume_size,volume_size,volume_size), grid.view(1,volume_size,volume_size,1,3), mode='bilinear', padding_mode='zeros', align_corners=None)[0][0][:,:].reshape(volume_size,volume_size)
-        return recon_x_i
+        # Get reconstruction parameters
+        self.input_fname = config.get('reconstructor', 'input_fname')
+        self.z_dim = config.getint('reconstructor', 'z_dim', fallback=1)
+        self.n_info = config.getint('reconstructor', 'n_info')
+        self.batch_size = config.getint('reconstructor', 'batch_size')
+        self.n_epochs = config.getint('reconstructor', 'n_epochs')
+        self.res_str = config.get('reconstructor', 'resolution_string')
 
-    recon_x = torch.zeros_like(x)
-    for i in range(n_batches):
-        arrth = recon_intens_3d[i]
-        symarrth = 0.25 * (arrth + torch.flip(arrth, [1]) + torch.flip(arrth, [2]) + torch.flip(arrth, [3]))
-        symarrth = (symarrth + symarrth.transpose(1,3).transpose(2,3) + symarrth.transpose(1,2).transpose(2,3)) / 3.
-        symarrth = 0.5 * (symarrth + torch.flip(symarrth, [1, 2, 3]))
-        recon_intens_3d_sym = symarrth
-        recon_x_i = best_projection_layer(recon_intens_3d_sym, x[i], i)
-        recon_x[i] = recon_x_i
+        print('resolution_type =', self.res_str)
+        print(self.z_dim, 'dimensional latent space')
+        print(self.n_epochs, 'epochs with a batch size of', self.batch_size)
 
-    BCE = F.binary_cross_entropy(recon_x, x, reduction='sum')
-    BSE = torch.sum((recon_x - x)**2)
-    KLD = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-    return BCE + KLD + BSE, BCE, BSE, KLD, recon_x
+        # Get output folder information
+        overwrite = config.getboolean('reconstructor', 'overwrite_output', fallback=False)
+        parent_dir = config.get('reconstructor', 'output_parent', fallback='data/')
+        suffix = config.get('reconstructor', 'output_suffix', fallback='')
+        self.output_folder = parent_dir + '/%s_%d_%s/' % (self.res_str, self.z_dim, suffix)
+        os.makedirs(self.output_folder, exist_ok=overwrite)
 
+        print('Saving data into folder: ', self.output_folder)
 
-def train(intens, rotation_sq_r, model, optimizer, epochs, n_batches, planes_S_th, fold_save):
+    def _get_model(self):
+        try:
+            mclass = getattr(networks, 'VAE_%s' % self.res_str)
+        except AttributeError as excep:
+            err_str = 'No network with resolution string %s defined.' % self.res_str
+            raise AttributeError(err_str) from excep
 
-  intensize = intens.shape[2]
-  print(epochs,' intens_size = ' ,intensize)
-  for epoch in range(epochs):
-    mu_all_0 = np.zeros((1,model.module.z_dim))
-    logvar_all_0 = np.zeros((1,model.module.z_dim))
-    for i in range(intens.shape[0]//n_batches):
-        # Local batches and labels
-        images = torch.from_numpy(intens[i*n_batches:(i+1)*n_batches]).view(n_batches,1,intensize,intensize)
-        images = images.float().to(device)
-        ori = torch.from_numpy(rotation_sq_r[i*n_batches:(i+1)*n_batches]).view(n_batches,5)
-        ori = ori.float().to(device)
-        recon_images, mu, logvar = model([images, ori])
-        mu_all_0 = np.concatenate((mu_all_0, mu.detach().cpu().clone().numpy()),axis=0)
-        logvar_all_0 = np.concatenate((logvar_all_0, logvar.detach().cpu().clone().numpy()),axis=0)
-        loss, bce, bse, kld, recon_2D_x = loss_function(recon_images, planes_S_th, images, mu, logvar, i, n_batches)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        print("Using %s on %d GPUs" % (mclass.__name__,  torch.cuda.device_count()))
+        if torch.cuda.device_count() > 1:
+            # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
+            self.model = nn.DataParallel(mclass(self.device, z_dim=self.z_dim, info=self.n_info))
+        else:
+            self.model = mclass(self.device, z_dim=self.z_dim, info=self.n_info)
+        self.model.to(self.device)
 
-        if (i%100 == 0):
-            to_print = "Epoch[{}/{}] Loss: {:.3f} {:.3f} {:.3f} {:.3f}".format(epoch+1,
-                                    epochs, loss.data.item(), bce.data.item(), bse.data.item(), kld.data.item())
-            print(to_print)
+    @staticmethod
+    def _to_numpy(torch_arr):
+        return torch_arr.detach().cpu().clone().numpy()
 
-  torch.save(model.module.state_dict(), fold_save+'/Vae_CNN3D_dict')
-  mu_all = mu_all_0[1:,:]
-  logvar_all = logvar_all_0[1:,:]
-  return mu_all, logvar_all
+    def preprocess(self):
+        self.preproc = Preprocessing(self.input_fname, self.res_str, self.n_info, self.device)
+        self.preproc.load()
+        self.preproc.scale_down()
+        self.preproc.shuffle()
+        self.preproc.slice_planes()
 
+    def run(self, runtype):
+        if runtype in ['train', 'all']:
+            mu_train, logvar_train = self.train()
 
+            label_all = self.preproc.label_r[:mu_train.shape[0]]
+            with h5py.File(self.output_folder + '/data_train.h5', "w") as data_tem:
+                data_tem['mu_all'] = mu_train
+                data_tem['logvar_all'] = logvar_train
+                data_tem['label_all'] = label_all
 
-def fit(intens, rotation_sq_r, model, optimizer, epochs, n_batches, planes_S_th):
-  mu_all_0 = np.zeros((1,model.module.z_dim))
-  logvar_all_0 = np.zeros((1,model.module.z_dim))
-  recon_2D_all_0 = np.zeros((1,1,intens.shape[2],intens.shape[2]))
+        if runtype in ['fit', 'all']:
+            mu_fit, logvar_fit = self.fit()
+            label_all = self.preproc.label_r[:mu_fit.shape[0]]
+            with h5py.File(self.output_folder + '/data_fit.h5', "w") as data_tem:
+                data_tem['mu_all'] = mu_fit
+                data_tem['logvar_all'] = logvar_fit
+                data_tem['label_all'] = label_all
 
-  for i in range(intens.shape[0]//n_batches):
-      # Local batches and labels
-      images = torch.from_numpy(intens[i*n_batches:(i+1)*n_batches]).view(n_batches,1,intens.shape[2],intens.shape[2])
-      images = images.float().to(device)
-      ori = torch.from_numpy(rotation_sq_r[i*n_batches:(i+1)*n_batches]).view(n_batches,5)
-      ori = ori.float().to(device)
-      recon_images, mu, logvar = model([images, ori])
-      mu_all_0 = np.concatenate((mu_all_0, mu.detach().cpu().clone().numpy()),axis=0)
-      logvar_all_0 = np.concatenate((logvar_all_0, logvar.detach().cpu().clone().numpy()),axis=0)
-      loss, bce, bse, kld, recon_2D_x = loss_function(recon_images, planes_S_th, images, mu, logvar, i, n_batches)
+        if runtype in ['generate', 'all']:
+            generating(self.z_dim, self.n_info, self.res_str, self.output_folder, self.device)
 
-      if (i < 3):
-          recon_2D_all_0 = np.concatenate((recon_2D_all_0, recon_2D_x.detach().cpu().clone().numpy()),axis=0)
+        if runtype == 'all':
+            if self.z_dim > 1:
+                yvals = (mu_train, mu_fit)
+            else:
+                yvals = (label_all, label_all)
 
-      if (i%n_batches == 0):
-          to_print = "Batch[{}/{}] Loss: {:.3f} {:.3f} {:.3f} {:.3f}".format(i*n_batches,
-                                  10000, loss.data.item(), bce.data.item(), bse.data.item(), kld.data.item())
+            plt.figure(figsize=(8, 4))
+            plt.subplot(121)
+            plt.scatter(mu_train[:,0], yvals[:,1], s=1, c=label_all[:,1])
+            plt.title('after training')
+            plt.subplot(122)
+            plt.scatter(mu_fit[:,0], yvals[:,1], s=1, c=label_all[:,1])
+            plt.title('after fitting')
+            plt.savefig(self.output_folder + '/latent_space_gain.png')
 
-          print(to_print)
+    def _best_projection_slice(self, intens_3d, ind):
+        select_plane = self.preproc.planes_S_th[ind]
+        size = intens_3d.shape[2]
+        grid = select_plane.float() #/(volume_size*sampling//2+1)
+        return functional.grid_sample(intens_3d.view(1, 1, size, size, size),
+                                      grid.view(1, size, size, 1, 3),
+                                      mode='bilinear', padding_mode='zeros',
+                                      align_corners=None)[0][0][:, :].reshape(size, size)
 
-  mu_all = mu_all_0[1:,:]
-  logvar_all = logvar_all_0[1:,:]
-  return mu_all, logvar_all
+    def loss_function(self, recon_intens_3d, x, mu, logvar, b_num):
+        recon_x = torch.zeros_like(x)
+        for i in range(self.batch_size):
+            arrth = recon_intens_3d[i]
+            symarrth = 0.25 * (arrth + torch.flip(arrth, [1]) +
+                               torch.flip(arrth, [2]) + torch.flip(arrth, [3]))
+            symarrth = (symarrth + symarrth.transpose(1,3).transpose(2,3) +
+                        symarrth.transpose(1,2).transpose(2,3)) / 3.
+            symarrth = 0.5 * (symarrth + torch.flip(symarrth, [1, 2, 3]))
+            recon_intens_3d_sym = symarrth
+            recon_x_i = self._best_projection_slice(recon_intens_3d_sym, b_num*self.batch_size + i)
+            recon_x[i] = recon_x_i
 
+        BCE = functional.binary_cross_entropy(recon_x, x, reduction='sum')
+        BSE = torch.sum((recon_x - x)**2)
+        KLD = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+        return BCE + KLD + BSE, BCE, BSE, KLD, recon_x
 
-def main(fname, z_dim, info, res, epochs, batch_size, fold_save, runtype):
-    preproc = Preprocessing(fname, res, info, device)
-    preproc.load()
-    preproc.scale_down()
-    preproc.shuffle()
-    preproc.slice_planes()
-    try:
-        os.mkdir(fold_save)
-        print('create dir: ' + fold_save)
-    except:
-        print('cannot create dir')
+    def train(self):
+        print('Start training')
+        intensize = self.preproc.intens.shape[2]
+        print(self.n_epochs,' intens_size =', intensize)
+
+        for epoch in range(self.n_epochs):
+            mu_all_0 = np.zeros((1, self.z_dim))
+            logvar_all_0 = np.zeros((1, self.z_dim))
+
+            for i in range(self.preproc.intens.shape[0] // self.batch_size):
+                # Local batches and labels
+                intens_batch = self.preproc.intens[i*self.batch_size:(i+1)*self.batch_size]
+                images = torch.from_numpy(intens_batch).view(self.batch_size, 1, intensize, intensize)
+                images = images.float().to(self.device)
+
+                ori_batch = self.preproc.rotation_sq_r[i*self.batch_size:(i+1)*self.batch_size]
+                ori = torch.from_numpy(ori_batch).view(self.batch_size, 5)
+                ori = ori.float().to(self.device)
+
+                recon_images, mu, logvar = self.model([images, ori])
+                loss, bce, bse, kld, recon_2D_x = self.loss_function(recon_images, images,
+                                                                     mu, logvar, i)
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                if i%100 == 0:
+                    to_print = "Epoch[{}/{}] Loss: {:.3f} {:.3f} {:.3f} {:.3f}".format(epoch+1,
+                                            self.n_epochs, loss.data.item(),
+                                            bce.data.item(), bse.data.item(), kld.data.item())
+                    print(to_print)
+
+        torch.save(self.model.module.state_dict(), self.output_folder + '/Vae_CNN3D_dict')
+
+        mu_all = mu_all_0[1:]
+        logvar_all = logvar_all_0[1:]
+        print('Done training!')
+        return mu_all, logvar_all
+
+    def fit(self):
+        self.model.module.load_state_dict(torch.load(self.output_folder + '/Vae_CNN3D_dict'))
+        self.model.eval()
+
+        print('Start fitting')
+        intensize = self.preproc.intens.shape[2]
+        mu_all_0 = np.zeros((1, self.z_dim))
+        logvar_all_0 = np.zeros((1, self.z_dim))
+        recon_2D_all_0 = np.zeros((1,1,self.preproc.intens.shape[2],self.preproc.intens.shape[2]))
+
+        for i in range(self.preproc.intens.shape[0]//self.batch_size):
+            # Local batches and labels
+            intens_batch = self.preproc.intens[i*self.batch_size:(i+1)*self.batch_size]
+            images = torch.from_numpy(intens_batch).view(self.batch_size, 1, intensize, intensize)
+            images = images.float().to(self.device)
+
+            ori_batch = self.preproc.rotation_sq_r[i*self.batch_size:(i+1)*self.batch_size]
+            ori = torch.from_numpy(ori_batch).view(self.batch_size, 5)
+            ori = ori.float().to(self.device)
+
+            recon_images, mu, logvar = self.model([images, ori])
+            loss, bce, bse, kld, recon_2D_x = self.loss_function(recon_images, images,
+                                                                 mu, logvar, i)
+
+            mu_all_0 = np.append(mu_all_0, self._to_numpy(mu))
+            logvar_all_0 = np.append(logvar_all_0, self._to_numpy(logvar))
+
+            if i < 3:
+                recon_2D_all_0 = np.append(recon_2D_all_0, self._to_numpy(recon_2D_x))
+
+            if i%self.batch_size == 0:
+                print("Batch[{}/{}] Loss: {:.3f} {:.3f} {:.3f} {:.3f}".format(i*self.batch_size,
+                                        10000, loss.data.item(),
+                                        bce.data.item(), bse.data.item(),
+                                        kld.data.item()))
+
+        mu_all = mu_all_0[1:,:]
+        logvar_all = logvar_all_0[1:,:]
+        print('Done fitting!')
+
+        return mu_all, logvar_all
+
+def main():
+    desc_str = 'Process 2D intensity averages using a Variation AutoEncoder framework'
+    parser = argparse.ArgumentParser(description=desc_str)
+    parser.add_argument('config_file', help='Path to configuration file')
+    parser.add_argument('-t', '--runtype', default='all',
+                        help='Run type: all (default), fit, train, generate')
+    parser.add_argument('-d', '--devnum', type=int, default=0,
+                        help='Device index for multi-GPU nodes (default: 0)')
+    args = parser.parse_args()
+
+    if args.runtype not in ['all', 'fit', 'train', 'generate']:
+        raise ValueError('Unknown run type: %s' % args.runtype)
+
+    device = torch.device('cuda:%d'%args.devnum if torch.cuda.is_available() else 'cpu')
+    torch.manual_seed(0)
+
+    recon = VAEReconstructor(args.config_file, device)
+    recon.preprocess()
 
     torch.manual_seed(0)
-    if (res == 2):
-        model = VAE_HD(device, z_dim=z_dim, info=info)
-        if torch.cuda.device_count() > 1:
-          print("Using VAE_HD on ", torch.cuda.device_count(), "GPUs!")
-          # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-          model = nn.DataParallel(VAE_HD(device, z_dim=z_dim, info=info))
-
-    if (res == 1):
-        model = VAE_MD(device, z_dim=z_dim, info=info)
-        if torch.cuda.device_count() > 1:
-          print("Using VAE_MD on ", torch.cuda.device_count(), "GPUs!")
-          # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-          model = nn.DataParallel(VAE_MD(device, z_dim=z_dim, info=info))
-
-    if (res == 0):
-        model = VAE_LD(device, z_dim=z_dim, info=info)
-        if torch.cuda.device_count() > 1:
-          print("Using VAE_LD on ", torch.cuda.device_count(), "GPUs!")
-          # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-          model = nn.DataParallel(VAE_LD(device, z_dim=z_dim, info=info))
-
-    if (res == 10):
-        model = VAE_LD(device, z_dim=z_dim, info=info)
-        if torch.cuda.device_count() > 1:
-          print("Using VAE_LD on ", torch.cuda.device_count(), "GPUs!")
-          # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-          model = nn.DataParallel(VAE_LD(device, z_dim=z_dim, info=info))
-
-    model.to(device)
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-
-    fig = plt.figure(figsize=(8,5))
-    for i in range(10):
-        plt.subplot(4,5,i+1)
-        plt.imshow(preproc.intens_input0[i*10])
-    for i in range(10):
-        plt.subplot(4,5,i+11)
-        plt.imshow(preproc.intens_input_c[i*10])
-    plt.tight_layout()
-    plt.savefig(fold_save+"/Input_example.png")
-
-    if (runtype == 'all'):
-        print('Start training')
-        mu_all0, logvar_all0 = train(preproc.intens, preproc.rotation_sq_r, model, optimizer, epochs, batch_size, preproc.planes_S_th, fold_save)
-        print('Done!')
-
-
-        label_all = preproc.label_r[:mu_all0.shape[0]]
-        with h5py.File(fold_save+'/data_train.h5', "w") as data_tem:
-            data_tem['mu_all'] = mu_all0
-            data_tem['logvar_all'] = logvar_all0
-            data_tem['label_all'] = label_all
-
-        print('Start fitting without eval')
-        model.module.load_state_dict(torch.load(fold_save+'/Vae_CNN3D_dict'))
-        #model.eval()
-        mu_all1, logvar_all1 = fit(preproc.intens, preproc.rotation_sq_r, model, optimizer, epochs, batch_size, preproc.planes_S_th)
-        print('Done!')
-
-        with h5py.File(fold_save+'/data_no_eval.h5', "w") as data_tem:
-            data_tem['mu_all'] = mu_all1
-            data_tem['logvar_all'] = logvar_all1
-            data_tem['label_all'] = label_all
-
-
-        print('Start fitting with eval')
-        model.module.load_state_dict(torch.load(fold_save+'/Vae_CNN3D_dict'))
-        model.eval()
-        mu_all2, logvar_all2 = fit(preproc.intens, preproc.rotation_sq_r, model, optimizer, epochs, batch_size, preproc.planes_S_th)
-        print('Done!')
-
-        with h5py.File(fold_save+'/data_eval.h5', "w") as data_tem:
-            data_tem['mu_all'] = mu_all2
-            data_tem['logvar_all'] = logvar_all2
-            data_tem['label_all'] = label_all
-
-        generating(z_dim, info, res, fold_save, device)
-
-        if (z_dim == 2):
-            plt.figure(figsize=(10,3))
-            plt.subplot(131)
-            plt.scatter(mu_all0[:,0], mu_all0[:,1], s=1, c=preproc.label_r[:mu_all0.shape[0],1])
-            plt.xlabel('after training')
-            plt.subplot(132)
-            plt.scatter(mu_all1[:,0], mu_all1[:,1], s=1, c=preproc.label_r[:mu_all1.shape[0],1])
-            plt.xlabel('fitting without eval')
-            plt.subplot(133)
-            plt.scatter(mu_all2[:,0], mu_all2[:,1], s=1, c=preproc.label_r[:mu_all2.shape[0],1])
-            plt.xlabel('fitting with eval')
-            plt.tight_layout()
-            plt.savefig(fold_save+'/latent_space_gain.png')
-
-        if (z_dim == 1):
-            plt.figure(figsize=(10,3))
-            plt.subplot(131)
-            plt.scatter(mu_all0, label_all[:,1], s=1, c=label_all[:,1])
-            plt.xlabel('after training')
-            plt.subplot(132)
-            plt.scatter(mu_all1, label_all[:,1], s=1, c=label_all[:,1])
-            plt.xlabel('fitting without eval')
-            plt.subplot(133)
-            plt.scatter(mu_all2, label_all[:,1], s=1, c=label_all[:,1])
-            plt.xlabel('fitting with eval')
-            plt.tight_layout()
-            plt.savefig(fold_save+'/latent_space_gain.png')
-
-    if (runtype == 'generate'):
-        generating(z_dim, info, res, fold_save, device)
-
-
+    recon.run(args.runtype)
 
 if __name__ == '__main__':
-    import configparser
-    config = configparser.ConfigParser()
-    config.read('config_real.ini')
-    Path = str(config['DEFAULT']['PATH'])
-    input_fname = str(config['DEFAULT']['input_fname'])
-    z_dim = int(config['DEFAULT']['z_dim'])
-    info = int(config['DEFAULT']['info'])
-    batch_size = int(config['DEFAULT']['batch_size'])
-    epochs = int(config['DEFAULT']['epochs'])
-    res = int(config['DEFAULT']['resolution_option'])
-    test_name = str(config['DEFAULT']['test_name'])
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--runtype', default='all', help='running type: all (default); generate')
-    args = parser.parse_args()
-    #res = 2
-
-    print('res = ',res, 'z_dim = ',z_dim, 'epochs = ',epochs, 'batch_size = ',batch_size )
-    if (res == 2):
-        if (info == 0):
-            save_foldername = 'HS_MODEL_z'+str(z_dim)+''
-            print('info = 0, save folder path = ' + Path+save_foldername)
-        if (info > 0):
-            info = 1
-            save_foldername = 'HS_MODEL_z'+str(z_dim)+'_G'
-            print('info = 1, save folder path = ' + Path+save_foldername)
-
-    if (res == 1):
-        if (info == 0):
-            save_foldername = 'MS_MODEL_z'+str(z_dim)+''
-            print('info = 0, save folder path = ' + Path+save_foldername)
-        if (info > 0):
-            info = 1
-            save_foldername = 'MS_MODEL_z'+str(z_dim)+'_G'
-            print('info = 1, save folder path = ' + Path+save_foldername)
-
-    if (res == 0):
-        if (info == 0):
-            save_foldername = 'LS_MODEL_z'+str(z_dim)+''
-            print('info = 0, save folder path = ' + Path+save_foldername)
-        if (info > 0):
-            info = 1
-            save_foldername = 'LS_MODEL_z'+str(z_dim)+'_G'
-            print('info = 1, save folder path = ' + Path+save_foldername)
-
-    if (res == 10):
-        if (info == 0):
-            save_foldername = 'MLS_MODEL_z'+str(z_dim)+''
-            print('info = 0, save folder path = ' + Path+save_foldername)
-        if (info > 0):
-            info = 1
-            save_foldername = 'MLS_MODEL_z'+str(z_dim)+'_G'
-            print('info = 1, save folder path = ' + Path+save_foldername)
-
-    test_name = '_SK'
-    fname = Path+input_fname
-    print('Reading data from file: ',fname)
-    fold_save = Path+save_foldername+test_name
-    print('Saving data into folder: ',fold_save)
-    runtype = args.runtype
-    main(Path+input_fname,z_dim,info,res,epochs,batch_size,fold_save, runtype)
+    main()
