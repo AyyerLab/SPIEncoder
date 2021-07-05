@@ -2,38 +2,37 @@ import random
 
 import numpy as np
 import h5py
-from scipy import interpolate
 import torch
 
 class Preprocessing:
-    def __init__(self, fname, res, info, device):
+    def __init__(self, fname, model, info, device):
         self.device = device
         self.fname = fname
-        self.res = res
+        self.model = model
         self.info = info
 
-        self._load()
-        self._sample()
-        self._slice_planes()
+        self.load()
+        self.sample()
+        self.slice_planes()
 
-    def _load(self):
+    def load(self):
         # TODO: Fix hardcoded file path and selection criterion
-        with h5py.File('/home/zhuangyu/VAE_cub42/ACC10k_PCA_coor.h5', 'r') as h5:
-            labels0 = np.copy(h5['predict_PCA_coor'][:])
+        with h5py.File('/home/zhuangyu/VAE_cub42/ACC10k_PCA_coor.h5', 'r') as h5f:
+            labels0 = h5f['predict_PCA_coor'][:]
         rlist = np.where(((labels0[:,0]+0.15)*(-4) > labels0[:,1]) & (labels0[:,1] > -0.5))[0]
         self.select_number = len(rlist)
 
-        with h5py.File(self.fname, 'r') as h5:
-            intens_input00 = np.copy(h5['intens_input'][:])
-            #self.ave_image = np.copy(h5['ave_image'][:])
-            gain0 = np.copy(h5['gain'][:])
-            corr0 = np.copy(h5['corr'][:])
-            rotation_sq0 = np.copy(h5['quat_data'][:])
-            self.qx1 = np.copy(h5['qx1'][:])
-            self.qy1 = np.copy(h5['qy1'][:])
-            self.qz1 = np.copy(h5['qz1'][:])
+        with h5py.File(self.fname, 'r') as h5f:
+            intens_input00 = h5f['intens_input'][:]
+            #self.ave_image = h5f['ave_image'][:]
+            gain0 = h5f['gain'][:]
+            corr0 = h5f['corr'][:]
+            rotation_sq0 = h5f['quat_data'][:]
+            self.qx1 = h5f['qx1'][:]
+            self.qy1 = h5f['qy1'][:]
+            self.qz1 = h5f['qz1'][:]
 
-        if self.info == 1:
+        if self.info == 5:
             rotation_sq0[:,4] = gain0
 
         self.labels = labels0[rlist]
@@ -42,105 +41,39 @@ class Preprocessing:
         self.corr = corr0[rlist]
         self.rotation_sq = rotation_sq0[rlist]
 
-    def _sample(self, shuffle=False):
-        print('res = ', self.res)
-        nl = self.intens_input0.shape[0]
-        xo = np.arange(-121, 122, 1.) / 121.
-        yo = np.arange(-121, 122, 1.) / 121.
-
-        if self.res == 'LD':
-            xn = np.arange(-40, 41, 1.) / 121
-            yn = np.arange(-40, 41, 1.) / 121
-            intens_input_c = np.zeros([nl, 81, 81])
-            for i in range(nl):
-                input_map = self.intens_input0[i]
-                f = interpolate.interp2d(xo, yo, input_map, kind='cubic')
-                intens_input_c[i] = f(xn,yn)
-        elif self.res == 'MD':
-            xn = np.arange(-80, 81, 1.) / 121
-            yn = np.arange(-80, 81, 1.) / 121
-            intens_input_c = np.zeros([nl,161,161])
-            for i in range(nl):
-                input_map = self.intens_input0[i]
-                f = interpolate.interp2d(xo, yo, input_map, kind='cubic')
-                intens_input_c[i] = f(xn,yn)
-        elif self.res == 'HD':
-            intens_input_c = self.intens_input0  #HD
-        elif self.res == 'LD_Paper':
-            intens_input_c = self.intens_input0[:,42:204:2,42:204:2]  #MD
-
-        self.imagesize = intens_input_c.shape[1]
-        print('input image size = ', intens_input_c.shape)
-
-        size_half = np.int((self.imagesize - 1)/2)
-        print('size_half = ', size_half)
-        x0,y0 = np.indices((self.imagesize ,self.imagesize)); x0-=size_half; y0-=size_half
-        intrad_2d = np.sqrt(x0**2+y0**2)
-        if self.res < 2:
-            intens_input_c[:,intrad_2d > (self.imagesize - 1)//2] = 0.0
-        if self.res == 2:
-            intens_input_c[:,intrad_2d > (self.imagesize - 1)//2] = 0.0
+    def sample(self, shuffle=False):
+        print('model type = ', self.model.__name__)
+        intens_input_c = self.model.preproc_sample_intens(self.intens_input0)
 
         if shuffle:
-            randomList = random.sample(range(0, self.select_number), self.select_number)
-            self.label_r = self.labels[randomList]
-            self.rotation_sq_r = self.rotation_sq[randomList,:5]
-            self.intens = intens_input_c/np.max(intens_input_c)*0.99
+            random_order = random.sample(range(0, self.select_number), self.select_number)
+            self.label_r = self.labels[random_order]
+            self.rotation_sq_r = self.rotation_sq[random_order,:5]
+            self.intens = intens_input_c / np.max(intens_input_c) * 0.99
         else:
             print('shuffle = False')
             self.label_r = self.labels
             self.rotation_sq_r = self.rotation_sq
-            self.intens = intens_input_c/np.max(intens_input_c)*0.99
+            self.intens = intens_input_c / np.max(intens_input_c) * 0.99
 
-    def scale_down_plane(self, input_plane):
-        xo0 = np.arange(-121, 122, 1)
-        yo0 = np.arange(-121, 122, 1)
-        xo = xo0/121.
-        yo = yo0/121.
-        f = interpolate.interp2d(xo, yo, input_plane, kind='cubic')
-        if self.res == 0:
-            xn0 = np.arange(-40, 41, 1)
-            yn0 = np.arange(-40, 41, 1)
-            xn = xn0/121.
-            yn = yn0/121.
-            plane_c = f(xn, yn)/(len(xn)//2+1)  #LD
-        if self.res == 1:
-            xn0 = np.arange(-80, 81, 1)
-            yn0 = np.arange(-80, 81, 1)
-            xn = xn0/121.
-            yn = yn0/121.
-            plane_c = f(xn, yn)/(len(xn)//2+1)  #MD
-        if self.res == 2:
-            plane_c = input_plane/(input_plane.shape[1]//2+1)  #HD
-        if self.res == 10:
-            xn0 = np.arange(-40, 41, 1)
-            yn0 = np.arange(-40, 41, 1)
-            xn = xn0/60.
-            yn = yn0/60.
-            plane_c = f(xn, yn)/(len(xn)*2//2+1) #LD
-
-        return plane_c
-
-    def q_rotation(self, x, y, z, i):
+    def _q_rotation(self, x, y, z, i):
         qw, qx, qy, qz, _ = self.rotation_sq_r[i]
         matrx = [[1 - 2*qy**2 - 2*qz**2, 2*qx*qy - 2*qz*qw, 2*qx*qz + 2*qy*qw],
                  [2*qx*qy + 2*qz*qw, 1 - 2*qx**2 - 2*qz**2, 2*qy*qz - 2*qx*qw],
                  [2*qx*qz - 2*qy*qw, 2*qy*qz + 2*qx*qw, 1 - 2*qx**2 - 2*qy**2]]
 
-        t = np.transpose(np.array([x, y, z]), (1,2,0))
-        x1,y1,z1 = np.transpose(t @ matrx, (2,0,1))
-        return x1,y1,z1
+        return np.transpose(np.transpose(np.array([x, y, z]), (1,2,0)) @ matrx, (2,0,1))
 
-    def _slice_planes(self):
-        n_Splanes = self.rotation_sq_r.shape[0]
-        planes_S = np.zeros((n_Splanes,self.imagesize,self.imagesize,3))
+    def slice_planes(self):
+        imagesize = self.intens.shape[1]
+        n_splanes = self.rotation_sq_r.shape[0]
+        planes_s = np.zeros((n_splanes,imagesize,imagesize,3))
 
-        x = self.scale_down_plane(self.qx1.reshape(243,243))
-        y = self.scale_down_plane(self.qy1.reshape(243,243))
-        z = self.scale_down_plane(self.qz1.reshape(243,243))
-        for i in range(n_Splanes):
-            x1,y1,z1 =  self.q_rotation(x,y,z, i)
-            planes_S[i] = np.array([x1,y1,z1]).T
+        x = self.model.preproc_scale_down_plane(self.qx1.reshape(243, 243))
+        y = self.model.preproc_scale_down_plane(self.qy1.reshape(243, 243))
+        z = self.model.preproc_scale_down_plane(self.qz1.reshape(243, 243))
+        for i in range(n_splanes):
+            planes_s[i] = self._q_rotation(x, y, z, i).T
 
-        self.planes_S_th = torch.from_numpy(planes_S).to(self.device)
+        self.planes_s_th = torch.from_numpy(planes_s).to(self.device)
         self.rotation_sq_r_th = torch.from_numpy(self.rotation_sq_r).to(self.device)
