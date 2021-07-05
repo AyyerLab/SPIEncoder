@@ -17,9 +17,12 @@ from generating_volumes import generating
 class VAEReconstructor():
     def __init__(self, config_fname, device, learning_rate=1.e-3):
         self.device = device
+
         self._parse_config(config_fname)
         self._get_model()
+
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.preproc = Preprocessing(self.input_fname, self.res_str, self.n_info, self.device)
 
     def _parse_config(self, config_fname):
         config = configparser.ConfigParser()
@@ -48,7 +51,7 @@ class VAEReconstructor():
 
     def _get_model(self):
         try:
-            mclass = getattr(networks, 'VAE_%s' % self.res_str)
+            mclass = getattr(networks, 'VAE%s' % self.res_str)
         except AttributeError as excep:
             err_str = 'No network with resolution string %s defined.' % self.res_str
             raise AttributeError(err_str) from excep
@@ -64,9 +67,6 @@ class VAEReconstructor():
     @staticmethod
     def _to_numpy(torch_arr):
         return torch_arr.detach().cpu().clone().numpy()
-
-    def preprocess(self):
-        self.preproc = Preprocessing(self.input_fname, self.res_str, self.n_info, self.device)
 
     def run(self, runtype):
         if runtype in ['train', 'all']:
@@ -87,7 +87,7 @@ class VAEReconstructor():
                 data_tem['label_all'] = label_all
 
         if runtype in ['generate', 'all']:
-            generating(self.z_dim, self.n_info, self.res_str, self.output_folder, self.device)
+            generating(self.z_dim, self.n_info, self.model, self.output_folder, self.device)
 
         if runtype == 'all':
             if self.z_dim > 1:
@@ -105,7 +105,7 @@ class VAEReconstructor():
             plt.savefig(self.output_folder + '/latent_space_gain.png')
 
     def _best_projection_slice(self, intens_3d, ind):
-        select_plane = self.preproc.planes_S_th[ind]
+        select_plane = self.preproc.planes_s_th[ind]
         size = intens_3d.shape[2]
         grid = select_plane.float() #/(volume_size*sampling//2+1)
         return functional.grid_sample(intens_3d.view(1, 1, size, size, size),
@@ -230,7 +230,6 @@ def main():
     torch.manual_seed(0)
 
     recon = VAEReconstructor(args.config_file, device)
-    recon.preprocess()
 
     torch.manual_seed(0)
     recon.run(args.runtype)
