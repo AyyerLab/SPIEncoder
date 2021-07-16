@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from scipy import interpolate
 import os
 import sys
-from network import UnFlatten, VAE_LD, VAE_MD, VAE_HD
+import networks
 
 
 def generating(z_dim, info, res, fold_save, device):
@@ -31,7 +31,7 @@ def generating(z_dim, info, res, fold_save, device):
         x1,y1,z1 = np.transpose(t @ M_axis, (2,0,1))
         return x1,y1,z1
 
-    def generate_volumes(latent_class, fold_save, res, z_dim, info=1):
+    def generate_volumes(latent_class, fold_save, res, z_dim, info):
         if (res == 0):
             scale = 81
             half_scale = scale//2
@@ -68,35 +68,22 @@ def generating(z_dim, info, res, fold_save, device):
         x111,y111,z111 = rotation(x111_0,y111_0,z111_0,2,np.pi/4)
 
         #model = VAE(z_dim=z_dim, info=info).to(device)
+        def _get_model(self):
+            try:
+                mclass = getattr(networks, 'VAE%s' % self.res_str)
+            except AttributeError as excep:
+                err_str = 'No network with resolution string %s defined.' % self.res_str
+                raise AttributeError(err_str) from excep
+
+            print("Using %s on %d GPUs" % (mclass.__name__,  torch.cuda.device_count()))
+            if torch.cuda.device_count() > 1:
+                # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
+                model = nn.DataParallel(mclass(device, z_dim=z_dim, info=info))
+            else:
+                model = mclass(device, z_dim=z_dim, info=info)
+            model.to(device)
+
         torch.manual_seed(0)
-        if (res == 2):
-            model = VAE_HD(device, z_dim=z_dim, info=info).to(device)
-            if torch.cuda.device_count() > 1:
-              print("Let's use", torch.cuda.device_count(), "GPUs!")
-              # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-              model = nn.DataParallel(VAE_HD(device, z_dim=z_dim, info=info)).to(device)
-
-        if (res == 1):
-            model = VAE_MD(device, z_dim=z_dim, info=info).to(device)
-            if torch.cuda.device_count() > 1:
-              print("Let's use", torch.cuda.device_count(), "GPUs!")
-              # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-              model = nn.DataParallel(VAE_MD(device, z_dim=z_dim, info=info)).to(device)
-
-        if (res == 0):
-            model = VAE_LD(device, z_dim=z_dim, info=info).to(device)
-            if torch.cuda.device_count() > 1:
-              print("Let's use", torch.cuda.device_count(), "GPUs!")
-              # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-              model = nn.DataParallel(VAE_LD(device, z_dim=z_dim, info=info)).to(device)
-
-        if (res == 10):
-            model = VAE_LD(device, z_dim=z_dim, info=info).to(device)
-            if torch.cuda.device_count() > 1:
-              print("Let's use", torch.cuda.device_count(), "GPUs!")
-              # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-              model = nn.DataParallel(VAE_LD(device, z_dim=z_dim, info=info)).to(device)
-
         #optimizer = optim.Adam(model.parameters(), lr=1e-3)
         model.module.load_state_dict(torch.load(fold_save+'/Vae_CNN3D_dict'))
         model.eval()

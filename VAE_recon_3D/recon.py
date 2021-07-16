@@ -22,14 +22,14 @@ class VAEReconstructor():
         self._get_model()
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
-        self.preproc = Preprocessing(self.input_fname, self.res_str, self.n_info, self.device)
+        self.preproc = Preprocessing(self.input_path, self.res_str, self.n_info, self.device)
 
     def _parse_config(self, config_fname):
         config = configparser.ConfigParser()
         config.read(config_fname)
 
         # Get reconstruction parameters
-        self.input_fname = config.get('reconstructor', 'input_fname')
+        self.input_path = config.get('reconstructor', 'input_path')
         self.z_dim = config.getint('reconstructor', 'z_dim', fallback=1)
         self.n_info = config.getint('reconstructor', 'n_info')
         self.batch_size = config.getint('reconstructor', 'batch_size')

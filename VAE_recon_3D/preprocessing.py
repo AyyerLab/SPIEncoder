@@ -5,9 +5,9 @@ import h5py
 import torch
 
 class Preprocessing:
-    def __init__(self, fname, model, info, device):
+    def __init__(self, input_path, model, info, device):
         self.device = device
-        self.fname = fname
+        self.input_path = input_path
         self.model = model
         self.info = info
 
@@ -17,12 +17,12 @@ class Preprocessing:
 
     def load(self):
         # TODO: Fix hardcoded file path and selection criterion
-        with h5py.File('/home/zhuangyu/VAE_cub42/ACC10k_PCA_coor.h5', 'r') as h5f:
+        with h5py.File(self.input_path + 'ACC10k_PCA_coor.h5', 'r') as h5f:
             labels0 = h5f['predict_PCA_coor'][:]
         rlist = np.where(((labels0[:,0]+0.15)*(-4) > labels0[:,1]) & (labels0[:,1] > -0.5))[0]
         self.select_number = len(rlist)
 
-        with h5py.File(self.fname, 'r') as h5f:
+        with h5py.File(self.input_path + 'VAE_input_pattern.h5', 'r') as h5f:
             intens_input00 = h5f['intens_input'][:]
             #self.ave_image = h5f['ave_image'][:]
             gain0 = h5f['gain'][:]
