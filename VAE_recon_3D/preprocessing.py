@@ -42,7 +42,7 @@ class Preprocessing:
         self.rotation_sq = rotation_sq0[rlist]
 
     def sample(self, shuffle=False):
-        print('model type = ', self.model.__name__)
+        print('model type = ', type(self.model).__name__)
         intens_input_c = self.model.preproc_sample_intens(self.intens_input0)
 
         if shuffle:
