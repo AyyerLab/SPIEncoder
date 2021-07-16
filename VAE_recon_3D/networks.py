@@ -174,7 +174,7 @@ class VAEMD(BaseVAE):
         y_new = np.arange(-lmax, lmax+1, 1.) / 121
         intens_input_c = np.zeros([num_l, 2*lmax+1, 2*lmax+1])
         for i in range(num_l):
-            input_map = self.intens_input0[i]
+            input_map = intens_input[i]
             interpf = interpolate.interp2d(x_orig, y_orig, input_map, kind='cubic')
             intens_input_c[i] = interpf(x_new, y_new)
 
@@ -234,7 +234,7 @@ class VAELD(BaseVAE):
         y_new = np.arange(-lmax, lmax+1, 1.) / 121
         intens_input_c = np.zeros([num_l, 2*lmax+1, 2*lmax+1])
         for i in range(num_l):
-            input_map = self.intens_input0[i]
+            input_map = intens_input[i]
             interpf = interpolate.interp2d(x_orig, y_orig, input_map, kind='cubic')
             intens_input_c[i] = interpf(x_new,y_new)
 

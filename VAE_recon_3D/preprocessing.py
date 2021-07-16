@@ -43,7 +43,7 @@ class Preprocessing:
 
     def sample(self, shuffle=False):
         print('model type = ', type(self.model).__name__)
-        intens_input_c = self.model.preproc_sample_intens(self.intens_input0)
+        intens_input_c = self.model.module.preproc_sample_intens(self.intens_input0)
 
         if shuffle:
             random_order = random.sample(range(0, self.select_number), self.select_number)
@@ -69,9 +69,9 @@ class Preprocessing:
         n_splanes = self.rotation_sq_r.shape[0]
         planes_s = np.zeros((n_splanes,imagesize,imagesize,3))
 
-        x = self.model.preproc_scale_down_plane(self.qx1.reshape(243, 243))
-        y = self.model.preproc_scale_down_plane(self.qy1.reshape(243, 243))
-        z = self.model.preproc_scale_down_plane(self.qz1.reshape(243, 243))
+        x = self.model.module.preproc_scale_down_plane(self.qx1.reshape(243, 243))
+        y = self.model.module.preproc_scale_down_plane(self.qy1.reshape(243, 243))
+        z = self.model.module.preproc_scale_down_plane(self.qz1.reshape(243, 243))
         for i in range(n_splanes):
             planes_s[i] = self._q_rotation(x, y, z, i).T
 

@@ -125,7 +125,7 @@ def generating(z_dim, info, res, fold_save, device):
     except:
         print('cannot creat dir')
 
-    with h5py.File(fold_save+'/data_eval.h5', "r") as data_tem:
+    with h5py.File(fold_save+'data_fit.h5', "r") as data_tem:
         mu_all = data_tem['mu_all'][:]
         logvar_all = data_tem['logvar_all'][:]
         label_all = data_tem['label_all'][:]
@@ -145,7 +145,7 @@ def generating(z_dim, info, res, fold_save, device):
         plt.ylabel('PCA-2')
         plt.colorbar(label='clpca-2')
         plt.tight_layout()
-        plt.savefig(fold_save+squence_name+"/Latent_1D.png")
+        plt.savefig(fold_save+squence_name+"Latent_1D.png")
 
         rec_model_3D_example, rec_model_plane = generate_volumes(latent_class, fold_save, res, z_dim)
 

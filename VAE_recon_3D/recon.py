@@ -22,7 +22,7 @@ class VAEReconstructor():
         self._get_model()
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
-        self.preproc = Preprocessing(self.input_path, self.res_str, self.n_info, self.device)
+        self.preproc = Preprocessing(self.input_path, self.model, self.n_info, self.device)
 
     def _parse_config(self, config_fname):
         config = configparser.ConfigParser()
@@ -207,8 +207,8 @@ class VAEReconstructor():
                                         bce.data.item(), bse.data.item(),
                                         kld.data.item()))
 
-        mu_all = mu_all_0[1:,:]
-        logvar_all = logvar_all_0[1:,:]
+        mu_all = mu_all_0[1:]
+        logvar_all = logvar_all_0[1:]
         print('Done fitting!')
 
         return mu_all, logvar_all
