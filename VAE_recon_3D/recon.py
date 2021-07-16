@@ -91,16 +91,16 @@ class VAEReconstructor():
 
         if runtype == 'all':
             if self.z_dim > 1:
-                yvals = (mu_train, mu_fit)
+                yvals = [mu_train, mu_fit]
             else:
-                yvals = (label_all, label_all)
+                yvals = [label_all, label_all]
 
             plt.figure(figsize=(8, 4))
             plt.subplot(121)
-            plt.scatter(mu_train[:,0], yvals[:,1], s=1, c=label_all[:,1])
+            plt.scatter(mu_train[:,0], yvals[0][:,1], s=1, c=label_all[:,1])
             plt.title('after training')
             plt.subplot(122)
-            plt.scatter(mu_fit[:,0], yvals[:,1], s=1, c=label_all[:,1])
+            plt.scatter(mu_fit[:,0], yvals[1][:,1], s=1, c=label_all[:,1])
             plt.title('after fitting')
             plt.savefig(self.output_folder + '/latent_space_gain.png')
 

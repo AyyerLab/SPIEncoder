@@ -17,7 +17,7 @@ class Preprocessing:
 
     def load(self):
         # TODO: Fix hardcoded file path and selection criterion
-        with h5py.File(self.input_path + 'ACC10k_PCA_coor.h5', 'r') as h5f:
+        with h5py.File(self.input_path + 'ACC10k_PCA_coor_new_labels.h5', 'r') as h5f:
             labels0 = h5f['predict_PCA_coor'][:]
         rlist = np.where(((labels0[:,0]+0.15)*(-4) > labels0[:,1]) & (labels0[:,1] > -0.5))[0]
         self.select_number = len(rlist)
