@@ -87,7 +87,7 @@ class VAEReconstructor():
                 data_tem['label_all'] = label_all
 
         if runtype in ['generate', 'all']:
-            generating(self.z_dim, self.n_info, self.model, self.output_folder, self.device)
+            generating(self.z_dim, self.n_info, self.res_str, self.output_folder, self.device)
 
         if runtype == 'all':
             if self.z_dim > 1:
@@ -151,6 +151,8 @@ class VAEReconstructor():
                 ori = ori.float().to(self.device)
 
                 recon_images, mu, logvar = self.model([images, ori])
+                mu_all_0 = np.concatenate((mu_all_0, mu.detach().cpu().clone().numpy()),axis=0)
+                logvar_all_0 = np.concatenate((logvar_all_0, logvar.detach().cpu().clone().numpy()),axis=0)
                 loss, bce, bse, kld, recon_2D_x = self.loss_function(recon_images, images,
                                                                      mu, logvar, i)
 
@@ -166,8 +168,8 @@ class VAEReconstructor():
 
         torch.save(self.model.module.state_dict(), self.output_folder + '/Vae_CNN3D_dict')
 
-        mu_all = mu_all_0[1:]
-        logvar_all = logvar_all_0[1:]
+        mu_all = mu_all_0[1:,:]
+        logvar_all = logvar_all_0[1:,:]
         print('Done training!')
         return mu_all, logvar_all
 
@@ -180,6 +182,7 @@ class VAEReconstructor():
         mu_all_0 = np.zeros((1, self.z_dim))
         logvar_all_0 = np.zeros((1, self.z_dim))
         recon_2D_all_0 = np.zeros((1,1,self.preproc.intens.shape[2],self.preproc.intens.shape[2]))
+        print(self.z_dim, mu_all_0.shape)
 
         for i in range(self.preproc.intens.shape[0]//self.batch_size):
             # Local batches and labels
@@ -192,11 +195,10 @@ class VAEReconstructor():
             ori = ori.float().to(self.device)
 
             recon_images, mu, logvar = self.model([images, ori])
+            mu_all_0 = np.concatenate((mu_all_0, mu.detach().cpu().clone().numpy()),axis=0)
+            logvar_all_0 = np.concatenate((logvar_all_0, logvar.detach().cpu().clone().numpy()),axis=0)
             loss, bce, bse, kld, recon_2D_x = self.loss_function(recon_images, images,
                                                                  mu, logvar, i)
-
-            mu_all_0 = np.append(mu_all_0, self._to_numpy(mu))
-            logvar_all_0 = np.append(logvar_all_0, self._to_numpy(logvar))
 
             if i < 3:
                 recon_2D_all_0 = np.append(recon_2D_all_0, self._to_numpy(recon_2D_x))
@@ -207,8 +209,8 @@ class VAEReconstructor():
                                         bce.data.item(), bse.data.item(),
                                         kld.data.item()))
 
-        mu_all = mu_all_0[1:]
-        logvar_all = logvar_all_0[1:]
+        mu_all = mu_all_0[1:,:]
+        logvar_all = logvar_all_0[1:,:]
         print('Done fitting!')
 
         return mu_all, logvar_all

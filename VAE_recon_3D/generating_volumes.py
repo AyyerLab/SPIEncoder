@@ -32,25 +32,27 @@ def generating(z_dim, info, res, fold_save, device):
         return x1,y1,z1
 
     def generate_volumes(latent_class, fold_save, res, z_dim, info):
-        if (res == 0):
+        if (res == 'LD'):
             scale = 81
             half_scale = scale//2
             factor = 243/81.
 
-        if (res == 1):
+        if (res == 'MD'):
             scale = 161
             half_scale = scale//2
             factor = 243/161.
 
-        if (res == 2):
+        if (res == 'HD'):
             scale = 243
             half_scale = scale//2
             factor = 1.
 
-        if (res == 10):
+        if (res == 'LDPaper'):
             scale = 81
             half_scale = scale//2
             factor = 243/161.
+
+        print(res, scale)
 
 
         x0,y0,z0 = np.indices((scale,scale,scale)); x0-=half_scale; y0-=half_scale; z0-=half_scale
@@ -68,22 +70,24 @@ def generating(z_dim, info, res, fold_save, device):
         x111,y111,z111 = rotation(x111_0,y111_0,z111_0,2,np.pi/4)
 
         #model = VAE(z_dim=z_dim, info=info).to(device)
-        def _get_model(self):
+        def _get_model(res):
             try:
-                mclass = getattr(networks, 'VAE%s' % self.res_str)
+                mclass = getattr(networks, 'VAE%s' % res)
             except AttributeError as excep:
-                err_str = 'No network with resolution string %s defined.' % self.res_str
+                err_str = 'No network with resolution string %s defined.' % res
                 raise AttributeError(err_str) from excep
 
-            print("Using %s on %d GPUs" % (mclass.__name__,  torch.cuda.device_count()))
+            print("Using %s on %d GPUs" % (type(mclass).__name__,  torch.cuda.device_count()))
             if torch.cuda.device_count() > 1:
                 # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
                 model = nn.DataParallel(mclass(device, z_dim=z_dim, info=info))
             else:
                 model = mclass(device, z_dim=z_dim, info=info)
             model.to(device)
+            return model
 
         torch.manual_seed(0)
+        model = _get_model(res)
         #optimizer = optim.Adam(model.parameters(), lr=1e-3)
         model.module.load_state_dict(torch.load(fold_save+'/Vae_CNN3D_dict'))
         model.eval()
@@ -129,6 +133,7 @@ def generating(z_dim, info, res, fold_save, device):
         mu_all = data_tem['mu_all'][:]
         logvar_all = data_tem['logvar_all'][:]
         label_all = data_tem['label_all'][:]
+    print('RES: ', res)
 
     if (z_dim == 1):
         zx_mean = np.mean(mu_all[:,0])
@@ -147,7 +152,7 @@ def generating(z_dim, info, res, fold_save, device):
         plt.tight_layout()
         plt.savefig(fold_save+squence_name+"Latent_1D.png")
 
-        rec_model_3D_example, rec_model_plane = generate_volumes(latent_class, fold_save, res, z_dim)
+        rec_model_3D_example, rec_model_plane = generate_volumes(latent_class, fold_save, res, z_dim, info)
 
         Latent_data_density = np.zeros(48)
         for i in range(48):
@@ -271,7 +276,7 @@ def generating(z_dim, info, res, fold_save, device):
         plt.tight_layout()
         plt.savefig(fold_save+squence_name+"/Latent_2D.png")
 
-        rec_model_3D_example, rec_model_plane = generate_volumes(latent_class, fold_save, res, z_dim)
+        rec_model_3D_example, rec_model_plane = generate_volumes(latent_class, fold_save, res, z_dim, info)
 
         Latent_data_density = np.zeros(200)
         for i in range(200):
