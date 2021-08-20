@@ -151,10 +151,13 @@ class VAEReconstructor():
                 ori = ori.float().to(self.device)
 
                 recon_images, mu, logvar = self.model([images, ori])
-                mu_all_0 = np.concatenate((mu_all_0, mu.detach().cpu().clone().numpy()),axis=0)
-                logvar_all_0 = np.concatenate((logvar_all_0, logvar.detach().cpu().clone().numpy()),axis=0)
                 loss, bce, bse, kld, recon_2D_x = self.loss_function(recon_images, images,
                                                                      mu, logvar, i)
+
+                if (epoch = self.n_epochs - 1):
+                    mu_all_0 = np.concatenate((mu_all_0, mu.detach().cpu().clone().numpy()),axis=0)
+                    logvar_all_0 = np.concatenate((logvar_all_0, logvar.detach().cpu().clone().numpy()),axis=0)
+
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -193,12 +196,13 @@ class VAEReconstructor():
             ori_batch = self.preproc.rotation_sq_r[i*self.batch_size:(i+1)*self.batch_size]
             ori = torch.from_numpy(ori_batch).view(self.batch_size, 5)
             ori = ori.float().to(self.device)
-
             recon_images, mu, logvar = self.model([images, ori])
-            mu_all_0 = np.concatenate((mu_all_0, mu.detach().cpu().clone().numpy()),axis=0)
-            logvar_all_0 = np.concatenate((logvar_all_0, logvar.detach().cpu().clone().numpy()),axis=0)
             loss, bce, bse, kld, recon_2D_x = self.loss_function(recon_images, images,
                                                                  mu, logvar, i)
+
+            mu_all_0 = np.concatenate((mu_all_0, mu.detach().cpu().clone().numpy()),axis=0)
+            logvar_all_0 = np.concatenate((logvar_all_0, logvar.detach().cpu().clone().numpy()),axis=0)
+
 
             if i < 3:
                 recon_2D_all_0 = np.append(recon_2D_all_0, self._to_numpy(recon_2D_x))
