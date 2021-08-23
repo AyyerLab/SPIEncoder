@@ -154,7 +154,7 @@ class VAEReconstructor():
                 loss, bce, bse, kld, recon_2D_x = self.loss_function(recon_images, images,
                                                                      mu, logvar, i)
 
-                if (epoch = self.n_epochs - 1):
+                if (epoch == self.n_epochs - 1):
                     mu_all_0 = np.concatenate((mu_all_0, mu.detach().cpu().clone().numpy()),axis=0)
                     logvar_all_0 = np.concatenate((logvar_all_0, logvar.detach().cpu().clone().numpy()),axis=0)
 
