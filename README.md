@@ -1,45 +1,29 @@
 # SPI Encoder
-Using encoder-decoder networks in combination with likelihood information to understand an ensemble of heterogeneous particles from their X-ray single particle imaging data.
+Using Variantional Auto-encoder network to understand an ensemble of heterogeneous particles from their X-ray single particle imaging data [https://arxiv.org/abs/2109.06179].
 
-## Installation
-Other than the standard packages, one needs `cupy` and `CuPADMAN` as prerequisites.
+Figure below shows the architecture of the VAE neural network, consisting of a 2D CNN pattern-encoder to encode 2D patterns along with their orientation estimates into distributions of latent parameters, and a 3D transposed convolution network as volume-decoder to generate 3D intensity volumes from latent numbers. This setting allows the neural networks to learn the 3D-heterogeneity-structure-encoded latent numbers from the diffraction patterns.
 
-Create conda environment.
+![plot](https://github.com/Yulong-Zhuang/3Dvolume_recon_for_FEL_single_particel_imaging/blob/main/appendix/VAE_structure.png)
 
-```sh
-$ git clone git@github.com:AyyerLab/SPIEncoder.git
-$ cd SPIEncoder
-$ pip install -e . # Note dot at end
-```
-
-## Usage
-
- * Create configuration file with an `[encoder]` section
-```ini
-[encoder]
-in_detector_file = data/det.h5
-num_div = 6
-loss_type = euclidean
-```
+The input is 2D diffraction patterns with estimated orientations and other parameters that could be used to indicate the 3D target shapes such as gain and CLPCA.
+In the paper due to the low S/N of single diffraction frames, we used Dragonfly averaged patterns.
+ 
+## How to use
+ * Clone the repo to local.
+ * Creating config file.
+A typical config file is shown below:
+   [reconstructor]
+   output_parent = /home/zhuangyu/VAE_data/VAE_test/                     #Output folder path
+   output_suffix = X                                                     #Name prefix of the output folder
+   input_path = /home/zhuangyu/VAE_data/VAE_cub42_ori_syn_all/           #Path to the input 2D patterns
+   overwrite_output = yes                                              
+ 
+   z_dim = 2                                                             #latent space dimension
+   n_info = 5                                                            #additional informations (e.g. orientation, gain or CLPCA ...)
+   batch_size = 10
+   n_epochs = 10
+   resolution_string = MD                                                # Resolution options: LD: 81^3; MD: 161^3; HD: 243^2; to reproduce result in the paper using LDPaper.
 
  * Run in python as follows
-```python
-import cupy as cp
-from SPIEncoder import LossCalculator
-
-cp.cuda.Device(0).use() # Choose device number
-
-lc = LossCalculator('config.ini') # Path to config file
-lc.calc_loss(img, model)
-
-# img.shape == (lc.det.num_pix,)
-# model.shape == (lc.size, lc.size, lc.size)
-```
-
-## Notes and To-Do's
- * Currently only Euclidean loss is available. Likelihood-based loss for individual frames should be included.
- * Parsing of class averages. Sparse frames can already be parsed.
- * Creating of detector file for class averages.
- * Implementation of actual VAE network, trained with this loss function
- * Optimization of loss calculation by aggregating frames with the same/similar model
-
+   python recon.py config.ini
+ 
